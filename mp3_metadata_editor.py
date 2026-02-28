@@ -81,6 +81,10 @@ class MP3MetadataEditor:
         self.cover_label.pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(cover_button_frame, text="Выбрать обложку", command=self.select_cover).pack(side=tk.LEFT)
         
+        # Опция удаления порядкового номера из имени файла
+        self.remove_number_var = tk.BooleanVar()
+        ttk.Checkbutton(metadata_frame, text="Удалять номер в названии файла", variable=self.remove_number_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=5, pady=5)
+        
         metadata_frame.columnconfigure(1, weight=1)
         
         # Кнопки управления
@@ -158,6 +162,25 @@ class MP3MetadataEditor:
         if file_path:
             self.cover_image_path = file_path
             self.cover_label.config(text=Path(file_path).name, foreground="black")
+
+    def rename_file(self, file_path: str) -> str:
+        """If checkbox is active, remove leading track number (e.g. "11. ") from filename."""
+        if not self.remove_number_var.get():
+            return file_path
+        dirname = os.path.dirname(file_path)
+        basename = os.path.basename(file_path)
+        # strip pattern of starting digits, dot and spaces
+        import re
+        newname = re.sub(r'^\s*\d+\.\s*', '', basename)
+        if newname and newname != basename:
+            newpath = os.path.join(dirname, newname)
+            try:
+                os.rename(file_path, newpath)
+            except Exception:
+                # ignore rename errors
+                return file_path
+            return newpath
+        return file_path
             
     def prev_file(self):
         if self.current_file_index > 0:
@@ -181,8 +204,11 @@ class MP3MetadataEditor:
             return
             
         file_path = os.path.join(self.current_dir, self.mp3_files[self.current_file_index])
-        self.save_metadata(file_path)
-        messagebox.showinfo("Успех", f"Метаданные сохранены для {self.mp3_files[self.current_file_index]}")
+        new_path = self.rename_file(file_path)
+        self.save_metadata(new_path)
+        messagebox.showinfo("Успех", f"Метаданные сохранены для {os.path.basename(new_path)}")
+        # обновляем список на случай изменения имени
+        self.load_mp3_files()
         
     def apply_to_all(self):
         if not self.mp3_files:
@@ -194,10 +220,13 @@ class MP3MetadataEditor:
         if confirm:
             for i, mp3_file in enumerate(self.mp3_files):
                 file_path = os.path.join(self.current_dir, mp3_file)
-                self.save_metadata(file_path)
+                new_path = self.rename_file(file_path)
+                self.save_metadata(new_path)
                 self.status_label.config(text=f"Обработано {i+1}/{len(self.mp3_files)}")
                 self.root.update()
                 
+            # после обработки обновим список в GUI в случае переименований
+            self.load_mp3_files()
             messagebox.showinfo("Успех", f"Метаданные применены ко всем файлам")
             self.status_label.config(text="Метаданные успешно применены", foreground="green")
         
