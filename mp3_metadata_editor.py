@@ -5,7 +5,6 @@ from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3, APIC
 from PIL import Image, ImageTk
-import io
 
 class MP3MetadataEditor:
     def __init__(self, root):
@@ -56,21 +55,31 @@ class MP3MetadataEditor:
         ttk.Label(metadata_frame, text="Исполнитель:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.artist_entry = ttk.Entry(metadata_frame, width=50)
         self.artist_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.EW)
+        # Bind paste to this entry
+        self.artist_entry.bind('<Control-v>', self.paste_event)
+        self.artist_entry.bind('<Control-V>', self.paste_event)
         
         # Альбом
         ttk.Label(metadata_frame, text="Альбом:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         self.album_entry = ttk.Entry(metadata_frame, width=50)
         self.album_entry.grid(row=1, column=1, padx=5, pady=5, sticky=tk.EW)
+        self.album_entry.bind('<Control-v>', self.paste_event)
+        self.album_entry.bind('<Control-V>', self.paste_event)
         
         # Год
         ttk.Label(metadata_frame, text="Год выпуска:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
         self.year_entry = ttk.Entry(metadata_frame, width=50)
         self.year_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.EW)
+        self.year_entry.bind('<Control-v>', self.paste_event)
+        self.year_entry.bind('<Control-V>', self.paste_event)
         
         # Жанр
         ttk.Label(metadata_frame, text="Жанр:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
         self.genre_entry = ttk.Entry(metadata_frame, width=50)
         self.genre_entry.grid(row=3, column=1, padx=5, pady=5, sticky=tk.EW)
+        self.genre_entry.bind('<Control-v>', self.paste_event)
+        self.genre_entry.bind('<Control-V>', self.paste_event)
+        # Context menu support will be added after widgets are created
         
         # Обложка
         ttk.Label(metadata_frame, text="Обложка:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
@@ -98,6 +107,36 @@ class MP3MetadataEditor:
         
         self.status_label = ttk.Label(main_frame, text="", foreground="blue")
         self.status_label.pack(fill=tk.X)
+        # Поддержка вставки через Ctrl+V: привяжем глобально и обработаем для полей ввода
+        self.root.bind_all('<Control-v>', self.on_paste)
+        self.root.bind_all('<Control-V>', self.on_paste)
+        # Extra bindings to improve reliability on different platforms
+        self.root.bind_all('<Control-Key-v>', self.on_paste)
+        self.root.bind_all('<Control-Key-V>', self.on_paste)
+        self.root.bind_all('<Control-Insert>', self.on_paste)
+        # Class-level bindings for Entry/ttk Entry/Text widgets
+        try:
+            self.root.bind_class('Entry', '<Control-v>', self.paste_event)
+            self.root.bind_class('Entry', '<Control-V>', self.paste_event)
+            self.root.bind_class('TEntry', '<Control-v>', self.paste_event)
+            self.root.bind_class('TEntry', '<Control-V>', self.paste_event)
+            self.root.bind_class('Text', '<Control-v>', self.paste_event)
+        except Exception:
+            pass
+        # Create context menu for Cut/Copy/Paste and bind right-click for entries
+        self._menu_widget = None
+        self._context_menu = tk.Menu(self.root, tearoff=0)
+        self._context_menu.add_command(label='Вырезать', command=self.cut_from_menu)
+        self._context_menu.add_command(label='Копировать', command=self.copy_from_menu)
+        self._context_menu.add_command(label='Вставить', command=self.paste_from_menu)
+
+        # Bind right-click to entries
+        for w in (self.artist_entry, self.album_entry, self.year_entry, self.genre_entry):
+            try:
+                w.bind('<Button-3>', self.show_context_menu)
+                w.bind('<Button-2>', self.show_context_menu)  # Middle click as fallback
+            except Exception:
+                pass
         
     def select_directory(self):
         directory = filedialog.askdirectory(title="Выберите директорию с MP3 файлами")
@@ -162,6 +201,117 @@ class MP3MetadataEditor:
         if file_path:
             self.cover_image_path = file_path
             self.cover_label.config(text=Path(file_path).name, foreground="black")
+
+    def on_paste(self, event=None):
+        """Handle global paste (Ctrl+V) and insert clipboard text into focused Entry/Text widget."""
+        try:
+            clip = self.root.clipboard_get()
+        except tk.TclError:
+            return "break"
+
+        fw = self.root.focus_get()
+        # If focused widget supports insert (Entry, Text, ttk.Entry etc.), insert clipboard
+        try:
+            if fw is not None and hasattr(fw, 'insert') and callable(getattr(fw, 'insert')):
+                fw.insert(tk.INSERT, clip)
+                # update status for debugging
+                try:
+                    self.status_label.config(text=f"Вставлено в {fw.winfo_class()}")
+                except Exception:
+                    pass
+                return "break"
+        except Exception:
+            # Some widgets may not accept insert; ignore
+            return "break"
+
+        return None
+
+    def paste_event(self, event):
+        """Insert clipboard text into the widget that received the event."""
+        widget = event.widget
+        try:
+            clip = self.root.clipboard_get()
+        except tk.TclError:
+            return "break"
+
+        try:
+            if widget is not None and hasattr(widget, 'insert') and callable(getattr(widget, 'insert')):
+                # insert at current cursor position
+                widget.insert(tk.INSERT, clip)
+                try:
+                    self.status_label.config(text=f"Вставлено в {widget.winfo_class()}")
+                except Exception:
+                    pass
+                return "break"
+        except Exception:
+            return "break"
+
+        return None
+
+    def show_context_menu(self, event):
+        try:
+            self._menu_widget = event.widget
+            # display menu
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._context_menu.grab_release()
+
+    def paste_from_menu(self):
+        try:
+            if not self._menu_widget:
+                return
+            clip = self.root.clipboard_get()
+        except tk.TclError:
+            return
+        try:
+            if hasattr(self._menu_widget, 'insert'):
+                self._menu_widget.insert(tk.INSERT, clip)
+                try:
+                    self.status_label.config(text=f"Вставлено в {self._menu_widget.winfo_class()}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def copy_from_menu(self):
+        if not self._menu_widget:
+            return
+        try:
+            # try to get selected text
+            txt = ''
+            try:
+                txt = self._menu_widget.selection_get()
+            except Exception:
+                txt = self._menu_widget.get()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(txt)
+            try:
+                self.status_label.config(text='Скопировано')
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def cut_from_menu(self):
+        if not self._menu_widget:
+            return
+        try:
+            try:
+                txt = self._menu_widget.selection_get()
+                start = self._menu_widget.index(tk.SEL_FIRST)
+                end = self._menu_widget.index(tk.SEL_LAST)
+                self._menu_widget.delete(start, end)
+            except Exception:
+                txt = self._menu_widget.get()
+                self._menu_widget.delete(0, tk.END)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(txt)
+            try:
+                self.status_label.config(text='Вырезано')
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def rename_file(self, file_path: str) -> str:
         """If checkbox is active, remove leading track number (e.g. "11. ") from filename."""
