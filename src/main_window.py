@@ -10,6 +10,7 @@ from pathlib import Path
 from .models import Metadata
 from .metadata_service import MetadataService
 from .file_service import FileService
+from .archive_service import ArchiveService
 from .utils import paste_to_widget, copy_from_widget, cut_from_widget, validate_year, validate_image_size
 from .ui_components import ProgressDialog, CoverPreview
 
@@ -36,6 +37,15 @@ class MainWindow:
         # Main frame
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Archive selection
+        archive_frame = ttk.LabelFrame(main_frame, text="Выбор архива")
+        archive_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.archive_label = ttk.Label(archive_frame, text="Архив не выбран", foreground="gray")
+        self.archive_label.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        ttk.Button(archive_frame, text="Выбрать архив", command=self.select_archive).pack(side=tk.RIGHT, padx=5, pady=5)
         
         # Directory selection
         dir_frame = ttk.LabelFrame(main_frame, text="Выбор директории")
@@ -147,6 +157,67 @@ class MainWindow:
             self.current_dir = directory
             self.dir_label.config(text=directory, foreground="black")
             self.load_mp3_files()
+    
+    def select_archive(self):
+        """Open file dialog to select archive and extract it."""
+        archive_path = filedialog.askopenfilename(
+            title="Выберите архив со стримами",
+            filetypes=[("Archive files", "*.zip *.rar *.7z"), ("ZIP files", "*.zip"), ("All files", "*.*")]
+        )
+        if not archive_path:
+            return
+        
+        # Get default extraction directory name from archive name
+        default_dir_name = ArchiveService.get_default_extract_name(archive_path)
+        
+        # Ask user for extraction directory
+        extract_dir = filedialog.askdirectory(
+            title="Выберите директорию для распаковки",
+            initialdir=os.path.dirname(archive_path)
+        )
+        if not extract_dir:
+            return
+        
+        # Ask if user wants to use default name or specify custom name
+        custom_name = messagebox.askyesno(
+            "Наименование папки",
+            f"Использовать наименование по умолчанию '{default_dir_name}'?\n\n"
+            "Нажмите 'Нет' для ввода собственного наименования."
+        )
+        
+        if not custom_name:
+            # Ask for custom directory name
+            from tkinter.simpledialog import askstring
+            custom_dir_name = askstring(
+                "Наименование папки",
+                "Введите наименование папки для распаковки:",
+                initialvalue=default_dir_name
+            )
+            if custom_dir_name is None:  # User cancelled
+                return
+            if custom_dir_name.strip() == "":
+                messagebox.showwarning("Предупреждение", "Наименование папки не может быть пустым")
+                return
+            final_extract_dir = os.path.join(extract_dir, custom_dir_name.strip())
+        else:
+            final_extract_dir = os.path.join(extract_dir, default_dir_name)
+        
+        # Extract archive
+        try:
+            extracted_dir = ArchiveService.extract_archive(archive_path, extract_dir, create_subdir=not custom_name if not custom_name else True)
+            
+            # Update UI to show extracted directory
+            self.current_dir = extracted_dir
+            self.dir_label.config(text=extracted_dir, foreground="black")
+            self.archive_label.config(text=f"Архив: {os.path.basename(archive_path)}", foreground="black")
+            
+            # Load MP3 files from extracted directory
+            self.load_mp3_files()
+            
+            messagebox.showinfo("Успех", f"Архив успешно распакован в:\n{extracted_dir}")
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось распаковать архив: {str(e)}")
     
     def load_mp3_files(self):
         """Scan directory for MP3 files and populate listbox."""

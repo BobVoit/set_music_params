@@ -4,8 +4,6 @@ Utility functions for clipboard handling, validation, etc.
 
 import os
 import tkinter as tk
-from typing import Union
-
 
 def paste_to_widget(widget, root: tk.Tk) -> bool:
     """
